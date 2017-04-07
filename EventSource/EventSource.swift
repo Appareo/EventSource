@@ -37,9 +37,8 @@ open class EventSource: NSObject, URLSessionDataDelegate {
 
     var event = Dictionary<String, String>()
 
-
     public init(url: String, headers: [String : String] = [:]) {
-
+        
         self.url = URL(string: url)!
         self.headers = headers
         self.readyState = EventSourceState.closed
@@ -98,6 +97,9 @@ open class EventSource: NSObject, URLSessionDataDelegate {
 //Mark: Close
 
     open func close() {
+        guard self.readyState == .open else {
+            return
+        }
         self.readyState = EventSourceState.closed
         self.urlSession?.invalidateAndCancel()
     }
@@ -155,7 +157,7 @@ open class EventSource: NSObject, URLSessionDataDelegate {
 		if self.readyState != EventSourceState.open {
             return
         }
-
+        
         self.receivedDataBuffer.append(data)
         let eventStream = extractEventsFromBuffer()
         self.parseEventStream(eventStream)
@@ -177,11 +179,21 @@ open class EventSource: NSObject, URLSessionDataDelegate {
     }
 
     open func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        self.readyState = EventSourceState.closed
 
 		if self.receivedMessageToClose(task.response as? HTTPURLResponse) {
 			return
 		}
+        
+        guard (error as? NSError)?.code != -999 else {
+            self.connect()
+            return
+        }
+        
+        // Handle cannot parse response.  Don't kill the session over it, keep rolling
+        guard (error as? NSError)?.code != -1017 else {
+            self.connect()
+            return
+        }
 
         if error == nil || (error as! NSError).code != -999 {
             let nanoseconds = Double(self.retryTime) / 1000.0 * Double(NSEC_PER_SEC)
@@ -190,6 +202,8 @@ open class EventSource: NSObject, URLSessionDataDelegate {
                 self.connect()
             }
         }
+        
+        self.readyState = EventSourceState.closed
 
         DispatchQueue.main.async {
             if let errorCallback = self.onErrorCallback {
